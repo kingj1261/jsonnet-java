@@ -86,6 +86,8 @@ public class Lexer {
             Token token = new Token(kind, data);
             tokens.add(token);
         }
+        Token token = new Token(Kind.END_OF_FILE, "");
+        tokens.add(token);
         return tokens;
     }
 
