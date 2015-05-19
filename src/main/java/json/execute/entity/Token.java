@@ -6,6 +6,11 @@ public class Token {
     private String data;
     LocationRange location;
 
+    public Token(Kind kind, String data) {
+        this.kind = kind;
+        this.data = data;
+    }
+
     public Kind getKind() {
         return kind;
     }
