@@ -1,0 +1,25 @@
+package json.execute.entity.ast;
+
+public enum ASTType {
+    AST_APPLY,
+    AST_ARRAY,
+    AST_BINARY,
+    AST_BUILTIN_FUNCTION,
+    AST_CONDITIONAL,
+    AST_ERROR,
+    AST_FUNCTION,
+    AST_IMPORT,
+    AST_IMPORTSTR,
+    AST_INDEX,
+    AST_LOCAL,
+    AST_LITERAL_BOOLEAN,
+    AST_LITERAL_NULL,
+    AST_LITERAL_NUMBER,
+    AST_LITERAL_STRING,
+    AST_OBJECT,
+    AST_OBJECT_COMPOSITION,
+    AST_SELF,
+    AST_SUPER,
+    AST_UNARY,
+    AST_VAR
+}
