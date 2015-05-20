@@ -1,5 +1,6 @@
 package json.execute.parser;
 
+import json.execute.Executor;
 import json.execute.entity.*;
 import json.execute.entity.ast.AST;
 import json.execute.entity.ast.Identifier;
@@ -19,7 +20,10 @@ import json.execute.entity.ast.represents.object.ObjectConstructor;
 import json.execute.entity.ast.represents.unary.Unary;
 import json.execute.entity.ast.represents.unary.UnaryOp;
 import json.execute.entity.ast.represents.object.Field;
+import json.execute.lex.Lexer;
 
+import java.io.IOException;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -144,7 +148,7 @@ public class Parser {
     public Token popExpect(Kind k, String data) {
         Token tok = pop();
         if (tok.getKind() != k) {
-            throw new RuntimeException("Expected token " + k + " but got " + tok);
+            throw new RuntimeException("Expected token " + k + " but got " + tok.getKind());
         }
         if (data != null && tok.getData() != data) {
             throw new RuntimeException("Expected operator " + data + " but got " + tok.getData());
@@ -716,4 +720,310 @@ public class Parser {
     public void setTokens(List<Token> tokens) {
         this.tokens = tokens;
     }
+
+    static long max_builtin = 23;
+
+    public static AST do_parse(String file, String input) {
+        // Lex the input.
+        Lexer lexer = new Lexer();
+        List<Token> token_list = lexer.jsonnet_lex(file, input);
+
+        // Parse the input.
+        Parser parser = new Parser(token_list);
+        AST expr = parser.parse(MAX_PRECEDENCE, 0);
+        if (token_list.get(0).getKind() != Kind.END_OF_FILE) {
+            throw new RuntimeException("Did not expect: " + token_list.get(0).getKind());
+        }
+
+        return expr;
+    }
+
+    public static AST jsonnet_parse(String file, String input) throws IOException {
+        // Parse the actual file.
+        AST expr = do_parse(file, input);
+
+        // Now, implement the std library by wrapping in a local construct.
+        String std = Executor.readFile("", Charset.defaultCharset());
+//        ObjectConstructor std_obj = (ObjectConstructor) do_parse("std.jsonnet", std);
+
+        // For generated ASTs, use a bogus location.
+        LocationRange l;
+
+//        Bind 'std' builtins that are implemented natively.
+//        Object::Fields &fields = std_obj->fields;
+//        for (unsigned long c=0 ; c <= max_builtin ; ++c) {
+//        const auto &decl = jsonnet_builtin_decl(c);
+//        std::vector<const Identifier*> params;
+//        for (const auto &p : decl.params)
+//        params.push_back(alloc->makeIdentifier(p));
+//        fields.emplace_back(alloc->make<LiteralString>(l, decl.name), Object::Field::HIDDEN,
+//                alloc->make<BuiltinFunction>(l, c, params));
+//    }
+//
+//        Local::Binds std_binds;
+//        std_binds[alloc->makeIdentifier("std")] = std_obj;
+        AST wrapped = new Local(expr.getLocation(), expr);
+        return wrapped;
+    }
+
+    public static String jsonnet_unparse_jsonnet(AST ast) {
+        Local wrapper = (Local) ast;
+        if (wrapper == null) {
+            throw new RuntimeException("INTERNAL ERROR: Unparsing an AST that wasn't wrapped in a std local.");
+        }
+        return unparse(wrapper.getBody());
+    }
+
+    public static String unparse(AST ast_) {
+        if (ast_ instanceof Apply) {
+            Apply ast = (Apply) ast_;
+            System.out.print(unparse(ast.getTarget()));
+            if (ast.getArguments().size() == 0) {
+                System.out.print("()");
+            } else {
+                String prefix = "(";
+                for (AST arg : ast.getArguments()) {
+                    System.out.print(prefix + unparse(arg));
+                    prefix = ", ";
+                }
+                System.out.print(")");
+            }
+
+        } else if (ast_ instanceof Array) {
+            Array ast = (Array) ast_;
+            if (ast.getElements().size() == 0) {
+                System.out.print("[ ]");
+            } else {
+                String prefix = "[";
+                for (AST element : ast.getElements()) {
+                    System.out.print(prefix);
+                    System.out.print(unparse(element));
+                    prefix = ", ";
+                }
+                System.out.print("]");
+            }
+
+        } else if (ast_ instanceof Binary) {
+            Binary ast = (Binary) ast_;
+            System.out.print(unparse(ast.getLeft()) + " " + bop_string(ast.getOp()) + " " + unparse(ast.getRight()));
+
+        } else if (ast_ instanceof BuiltinFunction) {
+            throw new RuntimeException("INTERNAL ERROR: Unparsing builtin function.");
+        } else if (ast_ instanceof Conditional) {
+            Conditional ast = (Conditional) ast_;
+            System.out.print("if " + unparse(ast.getCond()) + " then " + unparse(ast.getBranchTrue()) + " else " + unparse(ast.getBranchFalse()));
+
+        } else if (ast_ instanceof Error) {
+            Error ast = (Error) ast_;
+            System.out.print("error " + unparse(ast.getExpr()));
+
+        } else if (ast_ instanceof Function) {
+            Function ast = (Function) ast_;
+            System.out.print("function ");
+            String prefix = "(";
+            for (Identifier arg : ast.getParameters()) {
+                System.out.print(prefix + arg.getName());
+                prefix = ", ";
+            }
+            System.out.print(") " + unparse(ast.getBody()));
+
+        } else if (ast_ instanceof Import) {
+            Import ast = (Import) ast_;
+            System.out.print("import " + jsonnet_unparse_escape(ast.getFile()));
+
+        } else if (ast_ instanceof Importstr) {
+            Importstr ast = (Importstr) ast_;
+            System.out.print("importstr " + jsonnet_unparse_escape(ast.getFile()));
+
+        } else if (ast_ instanceof Index) {
+            Index ast = (Index) ast_;
+            System.out.println(unparse(ast.getTarget()) + "[" + unparse(ast.getIndex()) + "]");
+
+        } else if (ast_ instanceof Local) {
+            Local ast = (Local) ast_;
+            String prefix = "local ";
+            for (Map.Entry bind : ast.getBinds().entrySet()) {
+                System.out.print(prefix + ((Identifier) bind.getKey()).getName() + " = " + unparse((AST) bind.getValue()));
+                prefix = ", ";
+            }
+            System.out.print("; " + unparse(ast.getBody()));
+
+        } else if (ast_ instanceof LiteralBoolean) {
+            LiteralBoolean ast = (LiteralBoolean) ast_;
+            System.out.print(ast.isValue());
+
+        } else if (ast_ instanceof LiteralNumber) {
+            LiteralNumber ast = (LiteralNumber) ast_;
+            System.out.println(ast.getValue());
+
+        } else if (ast_ instanceof LiteralString) {
+            LiteralString ast = (LiteralString) ast_;
+            System.out.print(jsonnet_unparse_escape(ast.getValue()));
+
+        } else if (ast_ instanceof LiteralNull) {
+            System.out.print("null");
+
+        } else if (ast_ instanceof ObjectConstructor) {
+            ObjectConstructor ast = (ObjectConstructor) ast_;
+            if (ast.getFields().size() == 0) {
+                System.out.print("{ }");
+            } else {
+                String prefix = "{";
+                for (Field f : ast.getFields()) {
+                    System.out.print(prefix);
+                    String colons = null;
+                    switch (f.getHide()) {
+                        case INHERIT:
+                            colons = ":";
+                            break;
+                        case HIDDEN:
+                            colons = "::";
+                            break;
+                        case VISIBLE:
+                            colons = ":::";
+                            break;
+                        default:
+                            throw new RuntimeException("INTERNAL ERROR: Unknown FieldHide: " + f.getHide());
+                    }
+                    System.out.print("[" + unparse(f.getName()) + "]" + colons + " " + unparse(f.getBody()));
+                    prefix = ", ";
+                }
+                System.out.print("}");
+            }
+
+        } else if (ast_ instanceof ObjectComposition) {
+            ObjectComposition ast = (ObjectComposition) ast_;
+            System.out.print("{[" + unparse(ast.getField()) + "]: " + unparse(ast.getValue()));
+            System.out.print(" for " + ast.getId().getName() + " in " + unparse(ast.getArray()));
+            System.out.print("}");
+
+        } else if (ast_ instanceof Self) {
+            System.out.println("self");
+
+        } else if (ast_ instanceof Super) {
+            System.out.println("super");
+
+        } else if (ast_ instanceof Unary) {
+            Unary ast = (Unary) ast_;
+            System.out.print(uop_string(ast.getOp()) + unparse(ast.getExpr()));
+
+        } else if (ast_ instanceof Var) {
+            Var ast = (Var) ast_;
+            System.out.print(ast.getId().getName());
+
+        } else {
+            throw new RuntimeException("INTERNAL ERROR: Unknown AST: " + ast_);
+        }
+
+        return "(" + "" + ")";
+    }
+
+    public static String jsonnet_unparse_escape(String str) {
+        System.out.print('\"');
+        for (int i = 0; i < str.length(); ++i) {
+            char c = str.charAt(i);
+            switch (c) {
+                case '"':
+                    System.out.print("\\\"");
+                    break;
+                case '\\':
+                    System.out.print("\\\\");
+                    break;
+                case '\b':
+                    System.out.print("\\b");
+                    break;
+                case '\f':
+                    System.out.print("\\f");
+                    break;
+                case '\n':
+                    System.out.print("\\n");
+                    break;
+                case '\r':
+                    System.out.print("\\r");
+                    break;
+                case '\t':
+                    System.out.print("\\t");
+                    break;
+                case '\0':
+                    System.out.print("\\u0000");
+                    break;
+                default: {
+                    if (c < 0x20 || c > 0x7e) {
+                        //Unprintable, use
+                        System.out.print("");
+                    } else {
+                        // Printable, write verbatim
+                        System.out.print(c);
+                    }
+                }
+            }
+        }
+        System.out.print('\"');
+        return "";
+    }
+
+    public static String bop_string(BinaryOp bop) {
+        switch (bop) {
+            case BOP_MULT:
+                return "*";
+            case BOP_DIV:
+                return "/";
+
+            case BOP_PLUS:
+                return "+";
+            case BOP_MINUS:
+                return "-";
+
+            case BOP_SHIFT_L:
+                return "<<";
+            case BOP_SHIFT_R:
+                return ">>";
+
+            case BOP_GREATER:
+                return ">";
+            case BOP_GREATER_EQ:
+                return ">=";
+            case BOP_LESS:
+                return "<";
+            case BOP_LESS_EQ:
+                return "<=";
+
+            case BOP_MANIFEST_EQUAL:
+                return "==";
+            case BOP_MANIFEST_UNEQUAL:
+                return "!=";
+
+            case BOP_BITWISE_AND:
+                return "&";
+            case BOP_BITWISE_XOR:
+                return "^";
+            case BOP_BITWISE_OR:
+                return "|";
+
+            case BOP_AND:
+                return "&&";
+            case BOP_OR:
+                return "||";
+
+            default:
+                throw new RuntimeException("INTERNAL ERROR: Unrecognised binary operator: " + bop);
+        }
+    }
+
+    public static String uop_string(UnaryOp uop) {
+        switch (uop) {
+            case UOP_PLUS:
+                return "+";
+            case UOP_MINUS:
+                return "-";
+            case UOP_BITWISE_NOT:
+                return "~";
+            case UOP_NOT:
+                return "!";
+
+            default:
+                throw new RuntimeException("INTERNAL ERROR: Unrecognised unary operator: " + uop);
+        }
+    }
+
 }

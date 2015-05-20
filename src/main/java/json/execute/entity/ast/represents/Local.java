@@ -18,6 +18,11 @@ public class Local extends AST {
         this.body = body;
     }
 
+    public Local(LocationRange location, AST expr) {
+        super(location, ASTType.AST_LOCAL);
+        this.body = expr;
+    }
+
     public Map<Identifier, AST> getBinds() {
         return binds;
     }

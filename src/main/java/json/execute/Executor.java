@@ -10,30 +10,30 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Map;
 
 public class Executor {
 
-    private Lexer lexer = new Lexer();
-    private Parser parser = new Parser();
 
     public static void main(String[] args) throws IOException {
-        Executor executor = new Executor();
 
-        String jsonnet = executor.readFile("", Charset.defaultCharset());
-        String updatedJson = executor.getUpdatedJson(jsonnet);
+        String jsonnet = Executor.readFile("", Charset.defaultCharset());
+        String updatedJson = Executor.getUpdatedJson(jsonnet);
         System.out.println(updatedJson);
     }
 
-    public String getUpdatedJson(String jsonnet) throws IOException {
-        List<Token> tokens = lexer.lexJsonnet(jsonnet);
+    public static String getUpdatedJson(String jsonnet) throws IOException {
+        AST expr = Parser.jsonnet_parse("execute", jsonnet);
 
-        parser.setTokens(tokens);
-        AST ast = parser.parse(Parser.MAX_PRECEDENCE, 0);
+        String json_str;
+        Map<String, String> files;
+
+        String unparse = Parser.jsonnet_unparse_jsonnet(expr);
 
         return jsonnet;
     }
 
-    public String readFile(String path, Charset encoding) throws IOException {
+    public static String readFile(String path, Charset encoding) throws IOException {
         byte[] encoded = Files.readAllBytes(Paths.get(path));
         return new String(encoded, encoding);
     }
