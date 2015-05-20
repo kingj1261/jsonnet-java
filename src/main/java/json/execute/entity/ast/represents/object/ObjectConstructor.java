@@ -15,6 +15,10 @@ public class ObjectConstructor extends AST {
         this.fields = fields;
     }
 
+    public ObjectConstructor() {
+
+    }
+
     public List<Field> getFields() {
         return fields;
     }

@@ -6,9 +6,10 @@ public class Token {
     private String data;
     private LocationRange location;
 
-    public Token(Kind kind, String data) {
+    public Token(Kind kind, String data, LocationRange location) {
         this.kind = kind;
         this.data = data;
+        this.location = location;
     }
 
     public Kind getKind() {

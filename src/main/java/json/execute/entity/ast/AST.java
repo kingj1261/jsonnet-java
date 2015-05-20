@@ -15,6 +15,9 @@ public class AST {
         this.type = astUnary;
     }
 
+    public AST() {
+    }
+
     public LocationRange getLocation() {
         return location;
     }

@@ -1,8 +1,6 @@
 package json.execute.lex;
 
-import json.execute.entity.Kind;
-import json.execute.entity.State;
-import json.execute.entity.Token;
+import json.execute.entity.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -11,9 +9,11 @@ public class Lexer {
 
     public List<Token> lexJsonnet(String jsonnet) {
         List<Token> tokens = new ArrayList<Token>();
-        long lineNumber = 1;
+        long line_number = 1;
+        long line_start = 0;
 
         for (int i = 0; i < jsonnet.length(); i++) {
+            Location begin = new Location(line_number, i - line_start + 1);
             Kind kind = null;
             String data = "";
 
@@ -25,7 +25,7 @@ public class Lexer {
                     continue;
                     // Skip \n and maintain line numbers
                 case '\n':
-                    lineNumber++;
+                    line_number++;
                     continue;
                 case '{':
                     kind = Kind.BRACE_L;
@@ -83,10 +83,12 @@ public class Lexer {
                 }
                 break;
             }
-            Token token = new Token(kind, data);
+            Location end = new Location(line_number, i - line_start + 1);
+            Token token = new Token(kind, data, new LocationRange(jsonnet, begin, end));
             tokens.add(token);
         }
-        Token token = new Token(Kind.END_OF_FILE, "");
+        Location end = new Location(line_number, (jsonnet.length() - 1) - line_start + 1);
+        Token token = new Token(Kind.END_OF_FILE, "", new LocationRange(jsonnet, end, end));
         tokens.add(token);
         return tokens;
     }

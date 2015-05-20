@@ -216,9 +216,9 @@ public class Parser {
         binds.put(id, init);
     }
 
-    private Token parseObjectRemainder(AST obj, Token tok, int obj_level) {
+    private Map<Token, AST> parseObjectRemainder(AST obj, Token tok, int obj_level) {
         List<String> literal_fields = new ArrayList<String>();
-        List<Field> fields = null;
+        List<Field> fields = new ArrayList<Field>();
         Map<Identifier, AST> let_binds = new HashMap<Identifier, AST>();
 
         if (obj_level == 0) {
@@ -241,7 +241,7 @@ public class Parser {
             }
             if (next.getKind() == Kind.BRACE_R) {
                 // got_comma can be true or false here.
-                List<Field> r = null;
+                List<Field> r = new ArrayList<Field>();
                 if (let_binds.size() == 0) {
                     r = fields;
                 } else {
@@ -250,8 +250,11 @@ public class Parser {
                         r.add(0, new Field(f.getName(), f.getHide(), body));
                     }
                 }
+//                ObjectConstructor objectConstructor = new ObjectConstructor(span(tok, next), r);
                 obj = new ObjectConstructor(span(tok, next), r);
-                return next;
+                Map<Token, AST> result = new HashMap<Token, AST>();
+                result.put(next, obj);
+                return result;
             } else if (next.getKind() == Kind.FOR) {
                 if (fields.size() != 1) {
                     throw new RuntimeException("Object composition can only have one field/value pair.");
@@ -277,7 +280,7 @@ public class Parser {
                 AST array = parse(MAX_PRECEDENCE, obj_level);
                 Token last = popExpect(Kind.BRACE_R, null);
                 obj = new ObjectComposition(span(tok, last), field, value, id, array);
-                return last;
+                return null;
             }
             if (!got_comma)
                 throw new RuntimeException("Expected a comma before next field.");
@@ -389,8 +392,11 @@ public class Parser {
                 throw new RuntimeException("Unexpected end of file.");
 
             case BRACE_L: {
-                AST obj = null;
-                parseObjectRemainder(obj, tok, obj_level);
+                ObjectConstructor obj = new ObjectConstructor();
+                Map<Token, AST> tokenASTMap = parseObjectRemainder(obj, tok, obj_level);
+                for (Map.Entry entry : tokenASTMap.entrySet()) {
+                    obj = (ObjectConstructor) entry.getValue();
+                }
                 return obj;
             }
             case BRACKET_L: {
@@ -658,7 +664,7 @@ public class Parser {
 
                     } else if (op.getKind() == Kind.BRACE_L) {
                         AST obj = null;
-                        Token end = parseObjectRemainder(obj, op, obj_level);
+                        Token end = (Token) parseObjectRemainder(obj, op, obj_level);
                         lhs = new Binary(span(begin, end), lhs, BOP_PLUS, obj);
 
                     } else if (op.getData() == "%") {
