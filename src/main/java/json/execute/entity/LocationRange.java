@@ -6,6 +6,16 @@ public class LocationRange {
     private Location begin;
     private Location end;
 
+    public LocationRange(String file, Location begin, Location end) {
+        this.file = file;
+        this.begin = begin;
+        this.end = end;
+    }
+
+    public LocationRange() {
+
+    }
+
     public Location getBegin() {
         return begin;
     }

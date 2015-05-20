@@ -4,7 +4,7 @@ public class Token {
 
     private Kind kind;
     private String data;
-    LocationRange location;
+    private LocationRange location;
 
     public Token(Kind kind, String data) {
         this.kind = kind;
