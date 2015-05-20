@@ -4,8 +4,14 @@ import json.execute.entity.*;
 import json.execute.entity.ast.AST;
 import json.execute.entity.ast.Identifier;
 import json.execute.entity.ast.represents.*;
+import json.execute.entity.ast.represents.Error;
 import json.execute.entity.ast.represents.binary.Binary;
 import json.execute.entity.ast.represents.binary.BinaryOp;
+import json.execute.entity.ast.represents.importfile.Import;
+import json.execute.entity.ast.represents.importfile.Importstr;
+import json.execute.entity.ast.represents.literal.LiteralBoolean;
+import json.execute.entity.ast.represents.literal.LiteralNull;
+import json.execute.entity.ast.represents.literal.LiteralNumber;
 import json.execute.entity.ast.represents.literal.LiteralString;
 import json.execute.entity.ast.represents.object.Hide;
 import json.execute.entity.ast.represents.object.ObjectComposition;
@@ -316,10 +322,9 @@ public class Parser {
                         body = new Function(body.getLocation(), params, body);
                     }
                     if (plus_sugar) {
-                        AST f = new LiteralString (plus_loc, next.getData());
-                        AST super_f = new Index(plus_loc, new Super (new LocationRange()), f)
-                        ;
-                        body = new Binary (body.getLocation(), super_f, BOP_PLUS, body);
+                        AST f = new LiteralString(plus_loc, next.getData());
+                        AST super_f = new Index(plus_loc, new Super(new LocationRange()), f);
+                        body = new Binary(body.getLocation(), super_f, BOP_PLUS, body);
                     }
                     fields.add(0, new Field(field_expr, field_hide, body));
                 }
@@ -358,43 +363,6 @@ public class Parser {
         } while (true);
     }
 
-
-
-
-    private List<Token> tokens;
-
-    public Token peek() {
-        return tokens.get(0);
-    }
-
-    public Token pop() {
-        Token token = peek();
-        tokens.remove(0);
-        return token;
-    }
-
-    public AST parse(int precedence, int obj_level) {
-        Token begin = peek();
-        switch (begin.getKind()) {
-            default:
-                if (begin.getKind() == Kind.OPERATOR) {
-                    UnaryOp uop = null;
-                    if (UNARY_PRECEDENCE == precedence) {
-                        Token op = pop();
-                        AST expr = parse(precedence, obj_level);
-                        return new Unary(new LocationRange(), uop, expr);
-                    }
-                }
-
-                if (precedence == 0) {
-                    return parseTerminal(obj_level);
-                }
-
-                AST lhs = parse(precedence - 1, obj_level);
-                return null;
-        }
-    }
-
     private AST parseTerminal(int obj_level) {
         Token tok = pop();
         switch (tok.getKind()) {
@@ -425,8 +393,313 @@ public class Parser {
                 parseObjectRemainder(obj, tok, obj_level);
                 return obj;
             }
+            case BRACKET_L: {
+                Token next = peek();
+                if (next.getKind() == Kind.BRACKET_R) {
+                    pop();
+                    return new Array(span(tok, next), new ArrayList<AST>());
+                }
+                AST first = parse(MAX_PRECEDENCE, obj_level);
+                next = peek();
+                if (next.getKind() == Kind.FOR) {
+                    LocationRange l = new LocationRange();
+                    pop();
+                    Token id_token = popExpect(Kind.IDENTIFIER, null);
+                    Identifier id = new Identifier(id_token.getData());
+                    List<Identifier> params = new ArrayList<Identifier>();
+                    params.add(id);
+                    AST std = new Var(l, new Identifier("std"));
+                    AST map_func = new Function(first.getLocation(), params, first);
+                    popExpect(Kind.IN, null);
+                    AST arr = parse(MAX_PRECEDENCE, obj_level);
+                    Token maybe_if = pop();
+                    if (maybe_if.getKind() == Kind.BRACKET_R) {
+                        AST map_str = new LiteralString(l, "map");
+                        AST map = new Index(l, std, map_str);
+                        List<AST> args = new ArrayList<AST>();
+                        args.add(map_func);
+                        args.add(arr);
+                        return new Apply(span(tok, maybe_if), map, args, false);
+                    } else if (maybe_if.getKind() == Kind.IF) {
+                        AST cond = parse(MAX_PRECEDENCE, obj_level);
+                        Token last = popExpect(Kind.BRACKET_R, null);
+                        AST filter_func = new Function(cond.getLocation(), params, cond);
+                        AST fmap_str = new LiteralString(l, "filterMap");
+                        AST fmap = new Index(l, std, fmap_str);
+                        List<AST> args = new ArrayList<AST>();
+                        args.add(filter_func);
+                        args.add(map_func);
+                        args.add(arr);
+                        return new Apply(span(tok, last), fmap, args, false);
+                    } else {
+                        throw new RuntimeException("Expected if or ] after for clause, got: " + maybe_if);
+                    }
+                } else {
+                    List<AST> elements = new ArrayList<AST>();
+                    elements.add(first);
+                    do {
+                        next = peek();
+                        boolean got_comma = false;
+                        if (next.getKind() == Kind.COMMA) {
+                            pop();
+                            next = peek();
+                            got_comma = true;
+                        }
+                        if (next.getKind() == Kind.BRACKET_R) {
+                            pop();
+                            break;
+                        }
+                        if (!got_comma) {
+                            throw new RuntimeException("Expected a comma before next array element.");
+                        }
+                        elements.add(parse(MAX_PRECEDENCE, obj_level));
+                    } while (true);
+                    return new Array(span(tok, next), elements);
+                }
+            }
+
+            case PAREN_L: {
+                AST inner = parse(MAX_PRECEDENCE, obj_level);
+                popExpect(Kind.PAREN_R, null);
+                return inner;
+            }
+
+
+            // Literals
+            case NUMBER:
+                return new LiteralNumber(span(tok), Double.valueOf(tok.getData()));
+
+            case STRING:
+                return new LiteralString(span(tok), tok.getData());
+
+            case FALSE:
+                return new LiteralBoolean(span(tok), false);
+
+            case TRUE:
+                return new LiteralBoolean(span(tok), true);
+
+            case NULL_LIT:
+                return new LiteralNull(span(tok));
+
+            // Import
+            case IMPORT: {
+                Token file = popExpect(Kind.STRING, null);
+                return new Import(span(tok, file), file.getData());
+            }
+
+            case IMPORTSTR: {
+                Token file = popExpect(Kind.STRING, null);
+                return new Importstr(span(tok, file), file.getData());
+            }
+
+
+            // Variables
+            case DOLLAR:
+                if (obj_level == 0) {
+                    throw new RuntimeException("No top-level object found.");
+                }
+                return new Var(span(tok), new Identifier("$"));
+
+            case IDENTIFIER:
+                return new Var(span(tok), new Identifier(tok.getData()));
+
+            case SELF:
+                return new Self(span(tok));
+
+            case SUPER:
+                return new Super(span(tok));
         }
-        return null;
+
+        throw new RuntimeException("INTERNAL ERROR: Unknown tok kind: " + tok.getKind());
+    }
+
+    public AST parse(int precedence, int obj_level) {
+        Token begin = peek();
+
+        switch (begin.getKind()) {
+
+            // These cases have effectively MAX_PRECEDENCE as the first
+            // call to parse will parse them.
+            case ERROR: {
+                pop();
+                AST expr = parse(MAX_PRECEDENCE, obj_level);
+                return new Error(span(begin, expr), expr);
+            }
+
+            case IF: {
+                pop();
+                AST cond = parse(MAX_PRECEDENCE, obj_level);
+                popExpect(Kind.THEN, null);
+                AST branch_true = parse(MAX_PRECEDENCE, obj_level);
+                AST branch_false;
+                if (peek().getKind() == Kind.ELSE) {
+                    pop();
+                    branch_false = parse(MAX_PRECEDENCE, obj_level);
+                } else {
+                    branch_false = new LiteralNull(span(begin, branch_true));
+                }
+                return new Conditional(span(begin, branch_false),
+                        cond, branch_true, branch_false);
+            }
+
+            case FUNCTION: {
+                pop();
+                Token next = pop();
+                if (next.getKind() == Kind.PAREN_L) {
+                    List<AST> params_asts = null;
+                    parseCommaList(params_asts, Kind.PAREN_R,
+                            "function parameter", obj_level);
+                    AST body = parse(MAX_PRECEDENCE, obj_level);
+                    List<Identifier> params = new ArrayList<Identifier>();
+                    for (AST p_ast : params_asts) {
+                        Var p = (Var) p_ast;
+                        if (p == null) {
+                            throw new RuntimeException("Not an identifier: " + p_ast);
+                        }
+                        params.add(p.getId());
+                    }
+                    return new Function(span(begin, body), params, body);
+                } else {
+                    throw new RuntimeException("Expected ( but got " + next);
+                }
+            }
+
+            case LOCAL: {
+                pop();
+                Map<Identifier, AST> binds = null;
+                do {
+                    parseBind(binds, obj_level);
+                    Token delim = pop();
+                    if (delim.getKind() != Kind.SEMICOLON && delim.getKind() != Kind.COMMA) {
+                        throw new RuntimeException("Expected , or ; but got " + delim);
+                    }
+                    if (delim.getKind() == Kind.SEMICOLON) break;
+                } while (true);
+                AST body = parse(MAX_PRECEDENCE, obj_level);
+                return new Local(span(begin, body), binds, body);
+            }
+
+            default:
+
+                // Unary operator.
+                if (begin.getKind() == Kind.OPERATOR) {
+                    UnaryOp uop = null;
+                    if (!op_is_unary(begin.getData(), uop)) {
+                        throw new RuntimeException("Not a unary operator: " + begin.getData());
+                    }
+                    if (UNARY_PRECEDENCE == precedence) {
+                        Token op = pop();
+                        AST expr = parse(precedence, obj_level);
+                        return new Unary(span(op, expr), uop, expr);
+                    }
+                }
+
+                // Base case
+                if (precedence == 0) return parseTerminal(obj_level);
+
+                AST lhs = parse(precedence - 1, obj_level);
+
+                while (true) {
+
+                    // Then next token must be a binary operator.
+
+                    // The compiler can't figure out that this is never used uninitialized.
+                    BinaryOp bop = BOP_PLUS;
+
+                    // Check precedence is correct for this level.  If we're
+                    // parsing operators with higher precedence, then return
+                    // lhs and let lower levels deal with the operator.
+                    switch (peek().getKind()) {
+                        // Logical / arithmetic binary operator.
+                        case OPERATOR:
+                            if (peek().getData() == "%") {
+                                if (PERCENT_PRECEDENCE != precedence) return lhs;
+                            } else {
+                                if (!op_is_binary(peek().getData(), bop)) {
+                                    throw new RuntimeException("Not a binary operator: " + peek().getData());
+                                }
+                                if (precedence_map.get(bop) != precedence) return lhs;
+                            }
+                            break;
+
+                        // Index, Apply
+                        case DOT:
+                        case BRACKET_L:
+                        case PAREN_L:
+                        case BRACE_L:
+                            if (APPLY_PRECEDENCE != precedence) return lhs;
+                            break;
+
+                        default:
+                            return lhs;
+                    }
+
+                    Token op = pop();
+                    if (op.getKind() == Kind.BRACKET_L) {
+                        AST index = parse(MAX_PRECEDENCE, obj_level);
+                        Token end = popExpect(Kind.BRACKET_R, null);
+                        lhs = new Index(span(begin, end), lhs, index);
+
+                    } else if (op.getKind() == Kind.DOT) {
+                        Token field = popExpect(Kind.IDENTIFIER, null);
+                        AST index = new LiteralString(span(field), field.getData());
+                        lhs = new Index(span(begin, field), lhs, index);
+
+                    } else if (op.getKind() == Kind.PAREN_L) {
+                        List<AST> args = null;
+                        Token end = parseCommaList(args, Kind.PAREN_R,
+                                "function argument", obj_level);
+                        boolean tailcall = false;
+                        if (peek().getKind() == Kind.TAILCALL) {
+                            pop();
+                            tailcall = true;
+                        }
+                        lhs = new Apply(span(begin, end), lhs, args, tailcall);
+
+                    } else if (op.getKind() == Kind.BRACE_L) {
+                        AST obj = null;
+                        Token end = parseObjectRemainder(obj, op, obj_level);
+                        lhs = new Binary(span(begin, end), lhs, BOP_PLUS, obj);
+
+                    } else if (op.getData() == "%") {
+                        AST rhs = parse(precedence - 1, obj_level);
+                        LocationRange l = null;
+                        AST std = new Var(l, new Identifier("std"));
+                        AST mod_str = new LiteralString(l, "mod");
+                        AST f_mod = new Index(l, std, mod_str);
+                        List<AST> args = new ArrayList<AST>();
+                        args.add(lhs);
+                        args.add(rhs);
+                        lhs = new Apply(span(begin, rhs), f_mod, args, false);
+
+                    } else {
+                        // Logical / arithmetic binary operator.
+                        AST rhs = parse(precedence - 1, obj_level);
+                        boolean invert = false;
+                        if (bop == BOP_MANIFEST_UNEQUAL) {
+                            bop = BOP_MANIFEST_EQUAL;
+                            invert = true;
+                        }
+                        lhs = new Binary(span(begin, rhs), lhs, bop, rhs);
+                        if (invert) {
+                            lhs = new Unary(lhs.getLocation(), UOP_NOT, lhs);
+                        }
+                    }
+                }
+        }
+    }
+
+
+    private List<Token> tokens;
+
+    public Token peek() {
+        return tokens.get(0);
+    }
+
+    public Token pop() {
+        Token token = peek();
+        tokens.remove(0);
+        return token;
     }
 
     public List<Token> getTokens() {
